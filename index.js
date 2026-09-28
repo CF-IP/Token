@@ -230,29 +230,21 @@ async function fetchTcptest(browser) {
     await browser.close().catch(() => {});
   }
 
-  if (antpingToken) {
-    fs.writeFileSync('token.txt', antpingToken.trim(), 'utf-8');
-    console.log('📦 [保持完全兼容] token.txt 已更新');
+  let oldLines = [];
+  if (fs.existsSync('token.txt')) {
+    oldLines = fs.readFileSync('token.txt', 'utf-8').split('\n').map(l => l.trim()).filter(Boolean);
   }
 
-  if (tcptestTokens) {
-    fs.writeFileSync('tcptest_token.json', JSON.stringify(tcptestTokens, null, 2), 'utf-8');
-    console.log('📦 [新增站点凭据] tcptest_token.json 已更新');
-  }
+  const finalAntping = antpingToken ? antpingToken.trim() : (oldLines[0] || '');
+  const finalTcptest = tcptestTokens ? JSON.stringify(tcptestTokens) : (oldLines[1] || '');
 
-  const combined = {
-    updated_at: Math.floor(Date.now() / 1000),
-    antping: antpingToken || '',
-    tcptest: tcptestTokens || null
-  };
-  fs.writeFileSync('tokens.json', JSON.stringify(combined, null, 2), 'utf-8');
-  console.log('📦 [多源凭据总池] tokens.json 已更新');
+  const combinedContent = `${finalAntping}\n${finalTcptest}`.trim();
+  fs.writeFileSync('token.txt', combinedContent, 'utf-8');
+  console.log('✅ 已将全部站点凭据写入 token.txt（第1行 antping，第2行 tcptest）');
 
-  if (antpingToken || tcptestTokens) {
-    console.log('🎉 任务完成，至少成功同步一个站点的 Token。');
+  if (antpingToken || tcptestTokens || finalAntping) {
     process.exit(0);
   } else {
-    console.error('❌ 全部目标站点均未捕获到 Token');
     process.exit(1);
   }
 })();
