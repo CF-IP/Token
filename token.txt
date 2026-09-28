@@ -1,1 +1,2 @@
-eyJhbGciOiJIUzI1NiJ9.eyJpcCI6IjEzMi4xOTYuOTQuMzMiLCJ1dWlkIjoiN2MyMzkzMTJlZWU4NDkwMGFiNzdjMjVkMjAxZmZjOWIiLCJpc3MiOiJnZWVrIiwiaWF0IjoxNzkwNjI1MDk0LCJleHAiOjE3OTA2Mjg2OTR9.BK3dkPw9E4_m7Tw5iCTqIBXUMrnMMDka4uNkV9kGYJo
+eyJhbGciOiJIUzI1NiJ9.eyJpcCI6IjE3Mi4xODQuMjExLjg3IiwidXVpZCI6ImU2MmIzY2I2NGViNTQyY2FhZGU1NGI4NmU1ODJkMmE5IiwiaXNzIjoiZ2VlayIsImlhdCI6MTc5MDYyNTMzOSwiZXhwIjoxNzkwNjI4OTM5fQ.YF_akcJ5JKVU22VtDO8zNZJQA0KHERPm3f53g8xNPUM
+{"site":"www.tcptest.cn","protocol":"WebSocket","report_id":"","wss_url":"wss://www.tcptest.cn/ws/v1/client?task_id=505bd311-e44f-49af-9bd6-255c46c88fee","api_url":"/api/v2/tasks","auth_tokens":{"task_id":"505bd311-e44f-49af-9bd6-255c46c88fee","cancel_token":""},"raw_payload":""}
