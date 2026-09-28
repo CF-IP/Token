@@ -2,17 +2,31 @@ const fs = require('fs');
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 
+// 启用完全指纹伪装，移除 webdriver 特征
 puppeteer.use(StealthPlugin());
 
-async function fetchAntping(browser) {
-  console.log(`[${new Date().toISOString()}] >>> 开始抓取站点 1: antping.com...`);
-  const page = await browser.newPage();
+async function fetchToken() {
+  console.log(`[${new Date().toISOString()}] 启动隐身浏览器准备捕获 Token...`);
+  
+  const browser = await puppeteer.launch({
+    headless: 'new',
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-gpu',
+      '--window-size=1366,768'
+    ]
+  });
+
   let token = null;
 
   try {
+    const page = await browser.newPage();
     await page.setViewport({ width: 1366, height: 768 });
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36');
 
+    // 1. 深度劫持 WebSocket 消息帧
     await page.evaluateOnNewDocument(() => {
       const origSend = WebSocket.prototype.send;
       WebSocket.prototype.send = function (data) {
@@ -28,223 +42,75 @@ async function fetchAntping(browser) {
       };
     });
 
+    console.log('正在打开目标页面: https://antping.com/ping');
     await page.goto('https://antping.com/ping', { waitUntil: 'networkidle2', timeout: 35000 });
-    console.log('antping 页面已加载，准备触发测速...');
+    console.log('页面加载完成，当前标题:', await page.title());
 
+    // 2. 精准定位文本输入框（排除复选框）
     const inputSelector = 'input[type="text"], input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"])';
     await page.waitForSelector(inputSelector, { timeout: 10000 });
     const inputEl = await page.$(inputSelector);
+    
+    // 聚焦并输入测试目标 IP
     await inputEl.click({ clickCount: 3 });
-    await inputEl.type('1.1.1.1', { delay: 50 });
+    await inputEl.type('1.1.1.1', { delay: 60 });
+    console.log('已输入测试目标: 1.1.1.1');
 
-    await new Promise(r => setTimeout(r, 800));
+    await new Promise(r => setTimeout(r, 1000));
 
-    await page.evaluate(() => {
+    // 3. 精准点击「开始测试」按钮（从叶子节点穿透查找）
+    const clickSuccess = await page.evaluate(() => {
+      // 优先从 button 或具有点击特性的元素中找
       const candidates = Array.from(document.querySelectorAll('button, .el-button, a, div[role="button"]'));
       const realBtn = candidates.find(b => {
         const text = (b.innerText || b.textContent || '').trim();
         return text.includes('开始测试') && !b.querySelector('button');
       });
+
       if (realBtn) {
         realBtn.click();
-        return;
+        return '点击了候选按钮';
       }
+
+      // 兜底：反向查找最底层的叶子节点
       const allEls = Array.from(document.querySelectorAll('*')).reverse();
-      const leaf = allEls.find(el => (el.innerText || el.textContent || '').trim() === '开始测试');
-      if (leaf) leaf.click();
+      const leaf = allEls.find(el => (el.innerText || el.textContent || '').trim() === '开始测试' || (el.innerText || '').includes('开始测试'));
+      if (leaf) {
+        leaf.click();
+        return '点击了文本叶子节点';
+      }
+
+      return '未找到目标按钮';
     });
 
+    console.log('按钮触发结果:', clickSuccess);
+
+    // 4. 轮询捕获 Token（最长等待 25 秒）
     for (let i = 0; i < 50; i++) {
       await new Promise(r => setTimeout(r, 500));
       token = await page.evaluate(() => window.__CAPTURED_TOKEN__);
       if (token) break;
     }
-  } finally {
-    await page.close().catch(() => {});
-  }
 
-  if (token) {
-    console.log(`✅ antping 捕获成功: ${token.slice(0, 30)}...`);
-  } else {
-    console.warn('⚠️ antping 未能在等待时间内截获 Token');
-  }
-  return token;
-}
-
-async function fetchTcptest(browser) {
-  console.log(`[${new Date().toISOString()}] >>> 开始抓取站点 2: tcptest.cn...`);
-  const page = await browser.newPage();
-  
-  const result = {
-    site: 'www.tcptest.cn',
-    protocol: 'WebSocket',
-    report_id: '',
-    wss_url: '',
-    api_url: '/api/v2/tasks',
-    auth_tokens: {
-      task_id: '',
-      cancel_token: ''
-    },
-    raw_payload: ''
-  };
-
-  try {
-    await page.setViewport({ width: 1366, height: 768 });
-    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36');
-
-    const cdp = await page.target().createCDPSession();
-    await cdp.send('Network.enable');
-
-    cdp.on('Network.webSocketCreated', ({ url }) => {
-      console.log('⚡ [CDP 核心捕获] WebSocket 连接已建立:', url);
-      result.wss_url = url;
-      const match = String(url).match(/task_id=([a-f0-9-]+)/i);
-      if (match) {
-        result.auth_tokens.task_id = match[1];
-      }
-    });
-
-    cdp.on('Network.webSocketFrameSent', ({ response }) => {
-      if (response && response.payloadData && !result.raw_payload) {
-        result.raw_payload = response.payloadData;
-      }
-    });
-
-    cdp.on('Network.responseReceived', async ({ response, requestId }) => {
-      if (response.url.includes('/api/v2/tasks') || response.url.includes('/tasks')) {
-        try {
-          const bodyObj = await cdp.send('Network.getResponseBody', { requestId });
-          if (bodyObj && bodyObj.body) {
-            const json = JSON.parse(bodyObj.body);
-            const targetObj = (json.data && typeof json.data === 'object') ? json.data : json;
-            if (targetObj.task_id) result.auth_tokens.task_id = targetObj.task_id;
-            if (targetObj.cancel_token) result.auth_tokens.cancel_token = targetObj.cancel_token;
-            console.log('⚡ [CDP 核心捕获] 任务鉴权参数已获取:', result.auth_tokens.task_id);
-          }
-        } catch (_) {}
-      }
-    });
-
-    await page.goto('https://www.tcptest.cn/ping/', { waitUntil: 'domcontentloaded', timeout: 35000 });
-    console.log('tcptest 页面加载完成，准备寻找目标输入框...');
-
-    await page.waitForFunction(() => {
-      const inputs = Array.from(document.querySelectorAll('input'));
-      return inputs.some(i => i.offsetWidth > 100);
-    }, { timeout: 15000 });
-
-    const targetInputHandle = await page.evaluateHandle(() => {
-      const inputs = Array.from(document.querySelectorAll('input')).filter(i => {
-        const type = (i.type || 'text').toLowerCase();
-        return !['checkbox', 'radio', 'hidden', 'file'].includes(type) && i.offsetWidth > 100;
-      });
-
-      const matched = inputs.find(i => {
-        const p = (i.placeholder || '').toLowerCase();
-        return p.includes('ip') || p.includes('域名') || p.includes('host') || p.includes('地址');
-      });
-
-      return matched || inputs[0];
-    });
-
-    const targetInput = targetInputHandle.asElement();
-    if (!targetInput) {
-      throw new Error('未能在 tcptest 页面中定位到测速目标输入框');
-    }
-
-    await targetInput.click({ clickCount: 3 });
-    await page.keyboard.press('Backspace');
-    await targetInput.type('1.1.1.1', { delay: 40 });
-    console.log('已输入测试目标: 1.1.1.1，正在执行多重触发...');
-
-    await new Promise(r => setTimeout(r, 600));
-
-    await page.keyboard.press('Enter');
-
-    await page.evaluate(() => {
-      const buttons = Array.from(document.querySelectorAll('button, .el-button, input[type="submit"], [role="button"]'));
-      const validButtons = buttons.filter(b => {
-        if (b.closest('header, nav, .header, .nav, .navbar, .menu')) return false;
-        const text = (b.innerText || b.textContent || b.value || '').trim();
-        return /^(开始测试|立即测试|立即检测|测速|Ping|PING|开始)$/.test(text) ||
-               text.includes('开始测试') || text.includes('立即检测') || text.includes('立即测速');
-      });
-
-      if (validButtons.length > 0) {
-        validButtons[0].click();
-      }
-    });
-
-    for (let i = 0; i < 50; i++) {
-      await new Promise(r => setTimeout(r, 500));
-      if (result.auth_tokens.task_id && (result.auth_tokens.cancel_token || result.wss_url)) {
-        break;
-      }
-    }
-  } finally {
-    await page.close().catch(() => {});
-  }
-
-  if (!result.wss_url && result.auth_tokens.task_id) {
-    result.wss_url = `wss://www.tcptest.cn/ws/v1/client?task_id=${result.auth_tokens.task_id}`;
-  }
-
-  if (result.auth_tokens.task_id) {
-    console.log(`✅ tcptest 捕获成功: task_id=${result.auth_tokens.task_id}`);
-    return result;
-  } else {
-    console.warn('⚠️ tcptest 未能在等待时间内截获 task_id');
-    return null;
-  }
-}
-
-(async () => {
-  console.log(`[${new Date().toISOString()}] 启动浏览器实例执行多源 Token 同步...`);
-  const browser = await puppeteer.launch({
-    headless: 'new',
-    args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-      '--disable-gpu',
-      '--window-size=1366,768'
-    ]
-  });
-
-  let antpingToken = null;
-  let tcptestTokens = null;
-
-  try {
-    try {
-      antpingToken = await fetchAntping(browser);
-    } catch (e) {
-      console.error('antping 任务执行异常:', e.message);
-    }
-
-    try {
-      tcptestTokens = await fetchTcptest(browser);
-    } catch (e) {
-      console.error('tcptest 任务执行异常:', e.message);
-    }
   } finally {
     await browser.close().catch(() => {});
   }
 
-  let oldLines = [];
-  if (fs.existsSync('token.txt')) {
-    oldLines = fs.readFileSync('token.txt', 'utf-8').split('\n').map(l => l.trim()).filter(Boolean);
+  if (!token) {
+    throw new Error('未能在规定时间内截获到有效 Token');
   }
 
-  const finalAntping = antpingToken ? antpingToken.trim() : (oldLines[0] || '');
-  const finalTcptest = tcptestTokens ? JSON.stringify(tcptestTokens) : (oldLines[1] || '');
+  return token;
+}
 
-  const combinedContent = `${finalAntping}\n${finalTcptest}`.trim();
-  fs.writeFileSync('token.txt', combinedContent, 'utf-8');
-  console.log('✅ 已将全部站点凭据写入 token.txt（第1行 antping，第2行 tcptest）');
-
-  if (antpingToken || tcptestTokens || finalAntping) {
+(async () => {
+  try {
+    const token = await fetchToken();
+    fs.writeFileSync('token.txt', token.trim(), 'utf-8');
+    console.log(`✅ Token 已成功保存至本地 token.txt: ${token.slice(0, 30)}...`);
     process.exit(0);
-  } else {
+  } catch (err) {
+    console.error('❌ 执行失败:', err.message);
     process.exit(1);
   }
 })();
