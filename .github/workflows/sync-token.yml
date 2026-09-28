@@ -2,12 +2,12 @@ name: Auto Sync AntPing Token
 
 on:
   schedule:
-    # 每 30 分钟定时自动运行一次
-    - cron: '*/30 * * * *'
-  workflow_dispatch: # 支持手动点击按钮触发
+    # 每 25 分钟触发一次
+    - cron: '*/25 * * * *'
+  workflow_dispatch:
 
 permissions:
-  contents: write # 授予当前工作流自动写入本仓库文件的权限
+  contents: write
 
 jobs:
   sync:
