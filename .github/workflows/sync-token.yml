@@ -2,8 +2,12 @@ name: Auto Sync AntPing Token
 
 on:
   schedule:
+    # 每 30 分钟定时自动运行一次
     - cron: '*/30 * * * *'
-  workflow_dispatch:
+  workflow_dispatch: # 支持手动点击按钮触发
+
+permissions:
+  contents: write # 授予当前工作流自动写入本仓库文件的权限
 
 jobs:
   sync:
@@ -20,9 +24,13 @@ jobs:
       - name: 安装项目依赖
         run: npm install
 
-      - name: 运行 Token 提取与 KV 同步
-        env:
-          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
-          CF_KV_NAMESPACE_ID: ${{ secrets.CF_KV_NAMESPACE_ID }}
-          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+      - name: 运行爬虫抓取 Token
         run: node index.js
+
+      - name: 自动提交更新后的 token.txt 到私有仓库
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add token.txt
+          git commit -m "Auto update token [skip ci]" || exit 0
+          git push
