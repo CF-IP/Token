@@ -2,7 +2,7 @@ name: Auto Sync AntPing Token
 
 on:
   schedule:
-    # 每 25 分钟触发一次
+    # 每 25 分钟调度一次
     - cron: '*/25 * * * *'
   workflow_dispatch:
 
@@ -23,6 +23,13 @@ jobs:
 
       - name: 安装项目依赖
         run: npm install
+
+      # 在启动爬虫前加入随机延迟（完全不碰 index.js）
+      - name: 随机防风控等待
+        run: |
+          DELAY=$((10 + RANDOM % 110))
+          echo "随机休眠 ${DELAY} 秒后执行抓取..."
+          sleep $DELAY
 
       - name: 运行爬虫抓取 Token
         run: node index.js
