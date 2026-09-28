@@ -1,2 +1,1 @@
-eyJhbGciOiJIUzI1NiJ9.eyJpcCI6IjE3Mi4xODUuNTUuMTM3IiwidXVpZCI6IjBlOWViMDhmZGExMTRkMzRhNDc4OGI1MmVmYTU2Y2UzIiwiaXNzIjoiZ2VlayIsImlhdCI6MTc5MDYyNzIwOCwiZXhwIjoxNzkwNjMwODA4fQ.76CXzICq_jilxpqYhFgaAp4b7H7bXpk3aBTZ1KOD61k
-{"site":"www.tcptest.cn","protocol":"WebSocket","report_id":"","wss_url":"wss://www.tcptest.cn/ws/v1/client?task_id=bcef41ed-80f2-46d6-b92a-17b279e33917","api_url":"/api/v2/tasks","auth_tokens":{"task_id":"bcef41ed-80f2-46d6-b92a-17b279e33917","cancel_token":"DJFvckrxxlIukTlawduKQBgFeOKcOL6kzT0yB2yBo1M"},"raw_payload":""}
+eyJhbGciOiJIUzI1NiJ9.eyJpcCI6IjIwLjQwLjIxNC4yNTAiLCJ1dWlkIjoiODVkYTdjYWRkM2QwNGE3OWJiOGYyNDg3NTNhZThhYjIiLCJpc3MiOiJnZWVrIiwiaWF0IjoxNzkwNjI3ODYyLCJleHAiOjE3OTA2MzE0NjJ9.rK4Ia2mxhh8ztPEvfIi0agiwZh-HlQUYnC1scuvfpoQ
