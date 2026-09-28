@@ -92,87 +92,91 @@ async function fetchTcptest(browser) {
     await page.setViewport({ width: 1366, height: 768 });
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36');
 
-    await page.evaluateOnNewDocument(() => {
-      const origWS = window.WebSocket;
-      window.WebSocket = function (url, protocols) {
+    const cdp = await page.target().createCDPSession();
+    await cdp.send('Network.enable');
+
+    cdp.on('Network.webSocketCreated', ({ url }) => {
+      console.log('⚡ [CDP 核心捕获] WebSocket 连接已建立:', url);
+      result.wss_url = url;
+      const match = String(url).match(/task_id=([a-f0-9-]+)/i);
+      if (match) {
+        result.auth_tokens.task_id = match[1];
+      }
+    });
+
+    cdp.on('Network.webSocketFrameSent', ({ response }) => {
+      if (response && response.payloadData && !result.raw_payload) {
+        result.raw_payload = response.payloadData;
+      }
+    });
+
+    cdp.on('Network.responseReceived', async ({ response, requestId }) => {
+      if (response.url.includes('/api/v2/tasks') || response.url.includes('/tasks')) {
         try {
-          window.__TCPTEST_WSS_URL__ = url;
-          const match = String(url).match(/task_id=([a-f0-9-]+)/i);
-          if (match) {
-            window.__TCPTEST_TASK_ID__ = match[1];
+          const bodyObj = await cdp.send('Network.getResponseBody', { requestId });
+          if (bodyObj && bodyObj.body) {
+            const json = JSON.parse(bodyObj.body);
+            const targetObj = (json.data && typeof json.data === 'object') ? json.data : json;
+            if (targetObj.task_id) result.auth_tokens.task_id = targetObj.task_id;
+            if (targetObj.cancel_token) result.auth_tokens.cancel_token = targetObj.cancel_token;
+            console.log('⚡ [CDP 核心捕获] 任务鉴权参数已获取:', result.auth_tokens.task_id);
           }
         } catch (_) {}
-        const ws = new origWS(url, protocols);
-        const origSend = ws.send;
-        ws.send = function (data) {
-          try {
-            window.__TCPTEST_RAW_PAYLOAD__ = typeof data === 'string' ? data : '';
-          } catch (_) {}
-          return origSend.apply(this, arguments);
-        };
-        return ws;
-      };
-      window.WebSocket.prototype = origWS.prototype;
+      }
     });
 
-    page.on('response', async (response) => {
-      try {
-        const u = response.url();
-        if (u.includes('/api/v2/tasks') || u.includes('/tasks')) {
-          const json = await response.json();
-          if (json) {
-            if (json.task_id) result.auth_tokens.task_id = json.task_id;
-            if (json.cancel_token) result.auth_tokens.cancel_token = json.cancel_token;
-            if (json.data && typeof json.data === 'object') {
-              if (json.data.task_id) result.auth_tokens.task_id = json.data.task_id;
-              if (json.data.cancel_token) result.auth_tokens.cancel_token = json.data.cancel_token;
-            }
-          }
-        }
-      } catch (_) {}
+    await page.goto('https://www.tcptest.cn/ping/', { waitUntil: 'domcontentloaded', timeout: 35000 });
+    console.log('tcptest 页面加载完成，准备寻找目标输入框...');
+
+    await page.waitForFunction(() => {
+      const inputs = Array.from(document.querySelectorAll('input'));
+      return inputs.some(i => i.offsetWidth > 100);
+    }, { timeout: 15000 });
+
+    const targetInputHandle = await page.evaluateHandle(() => {
+      const inputs = Array.from(document.querySelectorAll('input')).filter(i => {
+        const type = (i.type || 'text').toLowerCase();
+        return !['checkbox', 'radio', 'hidden', 'file'].includes(type) && i.offsetWidth > 100;
+      });
+
+      const matched = inputs.find(i => {
+        const p = (i.placeholder || '').toLowerCase();
+        return p.includes('ip') || p.includes('域名') || p.includes('host') || p.includes('地址');
+      });
+
+      return matched || inputs[0];
     });
 
-    await page.goto('https://www.tcptest.cn/ping/', { waitUntil: 'networkidle2', timeout: 35000 });
-    console.log('tcptest 页面加载完成，准备定位输入框...');
+    const targetInput = targetInputHandle.asElement();
+    if (!targetInput) {
+      throw new Error('未能在 tcptest 页面中定位到测速目标输入框');
+    }
 
-    const inputSelector = 'input[type="text"], input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"])';
-    await page.waitForSelector(inputSelector, { timeout: 10000 });
-    const inputEl = await page.$(inputSelector);
-    await inputEl.click({ clickCount: 3 });
-    await inputEl.type('1.1.1.1', { delay: 50 });
+    await targetInput.click({ clickCount: 3 });
+    await page.keyboard.press('Backspace');
+    await targetInput.type('1.1.1.1', { delay: 40 });
+    console.log('已输入测试目标: 1.1.1.1，正在执行多重触发...');
 
-    await new Promise(r => setTimeout(r, 800));
+    await new Promise(r => setTimeout(r, 600));
+
+    await page.keyboard.press('Enter');
 
     await page.evaluate(() => {
-      const candidates = Array.from(document.querySelectorAll('button, .el-button, a, div[role="button"]'));
-      const realBtn = candidates.find(b => {
-        const text = (b.innerText || b.textContent || '').trim();
-        return (text.includes('开始测试') || text.includes('立即检测') || text.includes('Ping') || text.includes('开始')) && !b.querySelector('button');
+      const buttons = Array.from(document.querySelectorAll('button, .el-button, input[type="submit"], [role="button"]'));
+      const validButtons = buttons.filter(b => {
+        if (b.closest('header, nav, .header, .nav, .navbar, .menu')) return false;
+        const text = (b.innerText || b.textContent || b.value || '').trim();
+        return /^(开始测试|立即测试|立即检测|测速|Ping|PING|开始)$/.test(text) ||
+               text.includes('开始测试') || text.includes('立即检测') || text.includes('立即测速');
       });
-      if (realBtn) {
-        realBtn.click();
-        return;
+
+      if (validButtons.length > 0) {
+        validButtons[0].click();
       }
-      const allEls = Array.from(document.querySelectorAll('*')).reverse();
-      const leaf = allEls.find(el => {
-        const text = (el.innerText || el.textContent || '').trim();
-        return text === '开始测试' || text === '开始检测' || text === 'Ping';
-      });
-      if (leaf) leaf.click();
     });
 
     for (let i = 0; i < 50; i++) {
       await new Promise(r => setTimeout(r, 500));
-      const pageCaptured = await page.evaluate(() => ({
-        wss: window.__TCPTEST_WSS_URL__ || '',
-        taskId: window.__TCPTEST_TASK_ID__ || '',
-        payload: window.__TCPTEST_RAW_PAYLOAD__ || ''
-      }));
-
-      if (pageCaptured.wss && !result.wss_url) result.wss_url = pageCaptured.wss;
-      if (pageCaptured.taskId && !result.auth_tokens.task_id) result.auth_tokens.task_id = pageCaptured.taskId;
-      if (pageCaptured.payload && !result.raw_payload) result.raw_payload = pageCaptured.payload;
-
       if (result.auth_tokens.task_id && (result.auth_tokens.cancel_token || result.wss_url)) {
         break;
       }
