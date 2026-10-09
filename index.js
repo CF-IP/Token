@@ -5,9 +5,18 @@ const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 // 启用完全指纹伪装，移除 webdriver 特征
 puppeteer.use(StealthPlugin());
 
+// 从环境变量读取敏感参数（防窥探）
+const TARGET_URL = process.env.TARGET_URL;
+const BTN_TEXT = process.env.BTN_TEXT || '开始测试';
+
+if (!TARGET_URL) {
+  console.error('❌ 未检测到 TARGET_URL 环境变量，请在 Secrets 中配置');
+  process.exit(1);
+}
+
 async function fetchToken() {
   console.log(`[${new Date().toISOString()}] 启动隐身浏览器准备捕获 Token...`);
-  
+
   const browser = await puppeteer.launch({
     headless: 'new',
     args: [
@@ -42,15 +51,15 @@ async function fetchToken() {
       };
     });
 
-    console.log('正在打开目标页面: https://antping.com/ping');
-    await page.goto('https://antping.com/ping', { waitUntil: 'networkidle2', timeout: 35000 });
-    console.log('页面加载完成，当前标题:', await page.title());
+    console.log('正在打开目标页面...');
+    await page.goto(TARGET_URL, { waitUntil: 'networkidle2', timeout: 35000 });
+    console.log('页面加载完成');
 
     // 2. 精准定位文本输入框（排除复选框）
     const inputSelector = 'input[type="text"], input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"])';
     await page.waitForSelector(inputSelector, { timeout: 10000 });
-    const inputEl = await page.$(inputSelector);
-    
+    const inputEl = await page.\$(inputSelector);
+
     // 聚焦并输入测试目标 IP
     await inputEl.click({ clickCount: 3 });
     await inputEl.type('1.1.1.1', { delay: 60 });
@@ -58,13 +67,13 @@ async function fetchToken() {
 
     await new Promise(r => setTimeout(r, 1000));
 
-    // 3. 精准点击「开始测试」按钮（从叶子节点穿透查找）
-    const clickSuccess = await page.evaluate(() => {
+    // 3. 精准点击测试按钮（通过环境变量动态匹配）
+    const clickSuccess = await page.evaluate((keyword) => {
       // 优先从 button 或具有点击特性的元素中找
       const candidates = Array.from(document.querySelectorAll('button, .el-button, a, div[role="button"]'));
       const realBtn = candidates.find(b => {
         const text = (b.innerText || b.textContent || '').trim();
-        return text.includes('开始测试') && !b.querySelector('button');
+        return text.includes(keyword) && !b.querySelector('button');
       });
 
       if (realBtn) {
@@ -74,14 +83,14 @@ async function fetchToken() {
 
       // 兜底：反向查找最底层的叶子节点
       const allEls = Array.from(document.querySelectorAll('*')).reverse();
-      const leaf = allEls.find(el => (el.innerText || el.textContent || '').trim() === '开始测试' || (el.innerText || '').includes('开始测试'));
+      const leaf = allEls.find(el => (el.innerText || el.textContent || '').trim() === keyword || (el.innerText || '').includes(keyword));
       if (leaf) {
         leaf.click();
         return '点击了文本叶子节点';
       }
 
       return '未找到目标按钮';
-    });
+    }, BTN_TEXT);
 
     console.log('按钮触发结果:', clickSuccess);
 
@@ -107,7 +116,7 @@ async function fetchToken() {
   try {
     const token = await fetchToken();
     fs.writeFileSync('token.txt', token.trim(), 'utf-8');
-    console.log(`✅ Token 已成功保存至本地 token.txt: ${token.slice(0, 30)}...`);
+    console.log('✅ Token 已成功保存至本地 token.txt');
     process.exit(0);
   } catch (err) {
     console.error('❌ 执行失败:', err.message);
