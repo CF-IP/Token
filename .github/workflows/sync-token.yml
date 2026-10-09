@@ -24,7 +24,7 @@ jobs:
       - name: 安装项目依赖
         run: npm install
 
-      # 在启动爬虫前加入随机延迟（完全不碰 index.js）
+      # 在启动爬虫前加入随机延迟
       - name: 随机防风控等待
         run: |
           DELAY=$((10 + RANDOM % 110))
@@ -32,9 +32,12 @@ jobs:
           sleep $DELAY
 
       - name: 运行爬虫抓取 Token
+        env:
+          TARGET_URL: ${{ secrets.TARGET_URL }}
+          BTN_TEXT: ${{ secrets.BTN_TEXT }}
         run: node index.js
 
-      - name: 自动提交更新后的 token.txt 到私有仓库
+      - name: 自动提交更新后的 token.txt 到仓库
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
